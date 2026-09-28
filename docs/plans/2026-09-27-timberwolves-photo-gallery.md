@@ -11,6 +11,8 @@ Implement the approved photography-first, black-and-white, mobile-responsive ros
 
 ## Confirmed decisions and planning resolutions
 
+**Owner update, 2026-09-28:** After live diagnostics confirmed the hosted 100,000-iteration native PBKDF2 cap and a CPU-limit failure with the 600,000-iteration JavaScript alternative, the owner explicitly chose to remain on Free and approved 100,000 iterations: "Just keep on the free, if we only get 100000 thats fine." This supersedes the hashing work factor restriction below for this deployment. Keep salted server-side verification, rate limiting, and protected sessions. The generator and verifier must use the same 100,000-iteration policy; see `docs/deployment.md` for the measured login results.
+
 - One photo belongs to exactly one player; former players remain publicly listed. Explicit player deletion is **blocked while any associated photos remain**. Admin can reassign or permanently delete photos first; no silent cascade.
 - Public galleries are open, continuous and newest-upload-first; original downloads are untouched. No game grouping, public user accounts, watermarks, recycle bin or additional site pages.
 - Duplicate images use content hashes and require a per-photo **Keep or Skip** choice; accepted duplicates get independent storage keys.

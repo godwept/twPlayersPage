@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "miramichi-timberwolves-gallery",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-27",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "timberwolves-gallery",
+      "database_id": "eac00f80-a4fa-4597-9b21-abf834ac8005",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "timberwolves-gallery-photos"
+    }
+  ]
+}
