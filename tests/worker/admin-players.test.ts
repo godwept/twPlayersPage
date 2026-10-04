@@ -6,6 +6,29 @@ const api = 'http://example.com/api';
 const headers = { Origin: 'http://example.com', 'Content-Type': 'application/json' };
 
 describe('player admin routes', () => {
+  it('authenticates HockeyTech edits, exposes saved links and reports duplicates', async () => {
+    const ids = [crypto.randomUUID(), crypto.randomUUID()];
+    for (const id of ids) await env.DB.prepare('INSERT INTO players (id, first_name, last_name, created_at) VALUES (?, ?, ?, ?)').bind(id, 'Link', 'Test', new Date().toISOString()).run();
+    const patch = (id: string, value: unknown, cookie?: string) => exports.default.fetch(`${api}/admin/players/${id}`, {
+      method: 'PATCH', headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify({ hockeyTechPlayerId: value }),
+    });
+    expect((await patch(ids[0], '54321')).status).toBe(401);
+    const login = await exports.default.fetch(`${api}/admin/login`, { method: 'POST', headers, body: JSON.stringify({ password: 'test-only-password-for-workers' }) });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    for (const value of ['54321', ' 54322 ', null, '54323', '']) {
+      expect((await patch(ids[0], value, cookie)).status).toBe(200);
+      const roster = await (await exports.default.fetch(`${api}/players`)).json() as Array<{ id: string; hockeyTechPlayerId: string | null }>;
+      expect(roster.find((p) => p.id === ids[0])?.hockeyTechPlayerId).toBe(value?.trim() || null);
+      const player = await (await exports.default.fetch(`${api}/players/${ids[0]}`)).json() as { hockeyTechPlayerId: string | null };
+      expect(player.hockeyTechPlayerId).toBe(value?.trim() || null);
+    }
+    await patch(ids[0], '54321', cookie);
+    const conflict = await patch(ids[1], '54321', cookie);
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toEqual({ error: 'HockeyTech player ID is already linked to another player' });
+    expect((await patch(ids[1], 'bad', cookie)).status).toBe(400);
+  });
+
   it('adds, edits and intentionally removes players with an explicit photo conflict', async () => {
     const login = await exports.default.fetch(`${api}/admin/login`, { method: 'POST', headers, body: JSON.stringify({ password: 'test-only-password-for-workers' }) });
     const cookie = login.headers.get('set-cookie')!.split(';')[0];

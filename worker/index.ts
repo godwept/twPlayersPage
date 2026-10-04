@@ -3,7 +3,7 @@ import { addPlayer, findPlayer, InvalidPlayerError, listPlayers, normalizePlayer
 import { clearLoginFailures, isLoginAllowed, recordLoginFailure } from './auth/login-limit';
 import { PasswordVerificationError, verifyAdminPassword } from './auth/password';
 import { createSession, expiredSessionCookie, revokeSession, sessionTokenFromCookie, validateSession } from './auth/session';
-import { findPhoto, listPlayerPhotos } from './repos/photos';
+import { findPhoto, listHockeyTechPlayerPhotos, listPlayerPhotos } from './repos/photos';
 import { makeStoreZipStream, uniqueZipNames } from './lib/store-zip';
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
@@ -67,6 +67,36 @@ app.post('/admin/login', async (c) => {
 
 app.get('/admin/session', (c) => c.json({ authenticated: true }, 200, { 'Cache-Control': 'no-store' }));
 
+app.get('/admin/hockeytech/roster', async (c) => {
+  try {
+    const upstream = await fetch('https://tw-api.mathew-stewart.workers.dev/api/roster', { signal: AbortSignal.timeout(10_000) });
+    if (!upstream.ok) throw new Error('Roster request failed');
+    const payload = await upstream.json() as { roster?: Array<{ sections?: Array<{ data?: Array<{ row?: Record<string, unknown> }> }> }> };
+    const sections = payload?.roster?.[0]?.sections;
+    if (!Array.isArray(sections)) throw new Error('Malformed roster');
+    const players: Array<{ id: string; name: string; jerseyNumber: string; position: string; imageUrl: string }> = [];
+    for (const section of sections) {
+      if (!Array.isArray(section?.data)) throw new Error('Malformed roster section');
+      for (const entry of section.data) {
+        const row = entry?.row;
+        if (!row || typeof row !== 'object') throw new Error('Malformed roster row');
+        const id = typeof row.player_id === 'string' ? row.player_id.trim()
+          : typeof row.player_id === 'number' && Number.isSafeInteger(row.player_id) ? String(row.player_id) : '';
+        if (!/^\d{1,20}$/.test(id)) continue;
+        if (typeof row.name !== 'string' || !row.name.trim()) throw new Error('Malformed player name');
+        players.push({ id, name: row.name.trim(),
+          jerseyNumber: row.tp_jersey_number == null ? '' : String(row.tp_jersey_number),
+          position: row.position == null ? '' : String(row.position),
+          imageUrl: `https://assets.leaguestat.com/mhl/240x240/${id}.jpg`,
+        });
+      }
+    }
+    return c.json({ players }, 200, { 'Cache-Control': 'no-store' });
+  } catch {
+    return c.json({ error: 'Current roster lookup is unavailable. Enter a HockeyTech player ID manually or try again later.' }, 502, { 'Cache-Control': 'no-store' });
+  }
+});
+
 app.post('/admin/logout', async (c) => {
   await revokeSession(c.env.DB, sessionTokenFromCookie(c.req.header('Cookie') ?? null));
   return c.json({ ok: true }, 200, { 'Set-Cookie': expiredSessionCookie, 'Cache-Control': 'no-store' });
@@ -74,7 +104,7 @@ app.post('/admin/logout', async (c) => {
 
 app.get('/players', async (c) => {
   const result = await c.env.DB.prepare(`SELECT p.id, p.first_name AS firstName, p.last_name AS lastName,
-      p.jersey_number AS jerseyNumber,
+      p.jersey_number AS jerseyNumber, p.hockeytech_player_id AS hockeyTechPlayerId,
       COALESCE((SELECT selected.id FROM photos selected WHERE selected.id = p.featured_photo_id AND selected.player_id = p.id AND selected.state = 'active'),
         (SELECT recent.id FROM photos recent WHERE recent.player_id = p.id AND recent.state = 'active' ORDER BY recent.uploaded_at DESC, recent.id DESC LIMIT 1)) AS featuredPhotoId,
       (SELECT COUNT(*) FROM photos counted WHERE counted.player_id = p.id AND counted.state = 'active') AS photoCount,
@@ -85,6 +115,7 @@ app.get('/players', async (c) => {
     firstName: player.firstName,
     lastName: player.lastName,
     jerseyNumber: player.jerseyNumber,
+    hockeyTechPlayerId: player.hockeyTechPlayerId,
     featuredPhotoId: player.featuredPhotoId,
     photoCount: player.photoCount,
     featuredImageUrl: player.featuredPhotoId ? `/api/photos/${encodeURIComponent(String(player.featuredPhotoId))}/display` : null,
@@ -94,7 +125,7 @@ app.get('/players', async (c) => {
 
 app.get('/players/:id', async (c) => {
   const player = await findPlayer(c.env.DB, c.req.param('id'));
-  return player ? c.json({ id: player.id, firstName: player.first_name, lastName: player.last_name, jerseyNumber: player.jersey_number }) : c.json({ error: 'Player not found' }, 404);
+  return player ? c.json({ id: player.id, firstName: player.first_name, lastName: player.last_name, jerseyNumber: player.jersey_number, hockeyTechPlayerId: player.hockeytech_player_id }) : c.json({ error: 'Player not found' }, 404);
 });
 
 app.get('/players/:id/photos', async (c) => {
@@ -105,6 +136,42 @@ app.get('/players/:id/photos', async (c) => {
   } catch {
     return c.json({ error: 'Invalid gallery cursor' }, 400);
   }
+});
+
+app.get('/integrations/hockeytech/players/:id/photos', async (c) => {
+  const hockeyTechPlayerId = c.req.param('id');
+  if (!/^\d{1,20}$/.test(hockeyTechPlayerId)) return c.json({ error: 'HockeyTech player ID must contain 1 to 20 digits' }, 400);
+  try {
+    const limit = c.req.query('limit') ? Number(c.req.query('limit')) : 30;
+    const page = await listHockeyTechPlayerPhotos(c.env.DB, hockeyTechPlayerId, limit, c.req.query('cursor'));
+    const origin = new URL(c.req.url).origin;
+    return c.json({
+      hockeyTechPlayerId, linked: page !== null, photoCount: page?.photoCount ?? 0,
+      playerPageUrl: page ? new URL(`/player/${encodeURIComponent(page.playerId)}`, origin).href : null,
+      items: (page?.items ?? []).map((photo) => ({ ...photo, displayUrl: new URL(photo.displayUrl, origin).href })),
+      nextCursor: page?.nextCursor ?? null,
+    }, 200, { 'Cache-Control': 'no-store' });
+  } catch (error) {
+    if (error instanceof TypeError && error.message === 'Invalid gallery cursor') return c.json({ error: error.message }, 400);
+    throw error;
+  }
+});
+
+app.get('/integrations/hockeytech/photo-index', async (c) => {
+  const result = await c.env.DB.prepare(`SELECT p.hockeytech_player_id AS hockeyTechPlayerId,
+    (SELECT COUNT(*) FROM photos WHERE player_id = p.id AND state = 'active') AS photoCount,
+    COALESCE(
+      (SELECT id FROM photos WHERE id = p.featured_photo_id AND player_id = p.id AND state = 'active'),
+      (SELECT id FROM photos WHERE player_id = p.id AND state = 'active' ORDER BY uploaded_at DESC, id DESC LIMIT 1)
+    ) AS photoId
+    FROM players p WHERE p.hockeytech_player_id IS NOT NULL
+      AND EXISTS (SELECT 1 FROM photos WHERE player_id = p.id AND state = 'active')
+    ORDER BY p.hockeytech_player_id`).all<{ hockeyTechPlayerId: string; photoCount: number; photoId: string }>();
+  const origin = new URL(c.req.url).origin;
+  return c.json({ players: result.results.map((player) => ({
+    hockeyTechPlayerId: player.hockeyTechPlayerId, photoCount: player.photoCount,
+    displayUrl: new URL(`/api/photos/${encodeURIComponent(player.photoId)}/display`, origin).href,
+  })) }, 200, { 'Cache-Control': 'no-store' });
 });
 
 app.get('/photos/:id/:kind{display|original}', async (c) => {
@@ -212,6 +279,7 @@ app.patch('/admin/players/:id', async (c) => {
     await updatePlayer(c.env.DB, c.req.param('id'), await c.req.json());
     return c.json({ ok: true });
   } catch (error) {
+    if (error instanceof PlayerConflictError) return c.json({ error: error.message }, 409);
     if (error instanceof PlayerNotFoundError) return c.json({ error: 'Player not found' }, 404);
     if (error instanceof InvalidPlayerError) return c.json({ error: error.message }, 400);
     return c.json({ error: 'Invalid request' }, 400);

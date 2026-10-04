@@ -10,6 +10,7 @@ type Player = {
   firstName: string;
   lastName: string;
   jerseyNumber: string | null;
+  hockeyTechPlayerId?: string | null;
   featuredImageUrl?: string | null;
   featuredPhotoId?: string | null;
   crop?: { x: number; y: number; zoom: number };
@@ -17,6 +18,7 @@ type Player = {
 type RosterPlayer = Player & { photoCount: number };
 type Photo = { id: string; filename: string; uploadedAt: string; displayUrl: string; originalDownloadUrl: string };
 type GalleryPage = { items: Photo[]; nextCursor: string | null };
+type HockeyTechRosterPlayer = { id: string; name: string; jerseyNumber: string; position: string; imageUrl: string };
 type SiteSettings = { bannerUrl: string | null; logoUrl: string | null; bannerPosition: { x: number; y: number } };
 type UploadItem = { id: string; file: File; display: Blob | null; sha256: string; crc32: number; playerId: string; duplicate: boolean; duplicateChoice: '' | 'keep' | 'skip'; status: 'review' | 'publishing' | 'published' | 'skipped' | 'failed'; error?: string };
 
@@ -455,6 +457,37 @@ function RosterCsvImport({ onImported }: { onImported: () => void }) {
   </div>;
 }
 
+function HockeyTechRosterPicker({ onSelect }: { onSelect: (id: string) => void }) {
+  const [players, setPlayers] = useState<HockeyTechRosterPlayer[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+
+  async function loadRoster() {
+    setLoading(true); setError('');
+    try {
+      const roster = await getJson<{ players: HockeyTechRosterPlayer[] }>('/api/admin/hockeytech/roster');
+      setPlayers(roster.players);
+    } catch (reason) { setError((reason as Error).message); }
+    finally { setLoading(false); }
+  }
+
+  const query = search.trim().toLowerCase();
+  const matches = players?.filter((player) => `${player.name} ${player.jerseyNumber} ${player.position}`.toLowerCase().includes(query));
+  return <div className="hockeytech-picker">
+    <button type="button" className="button button--outline" disabled={loading} onClick={loadRoster}>{loading ? 'Loading roster…' : 'Find from current roster'}</button>
+    {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
+    {players ? <>
+      <label>Search current roster<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
+      <div className="hockeytech-picker__results">{matches?.map((player) => <button type="button" key={player.id} className="hockeytech-picker__player" aria-label={`Select ${player.name}`} onClick={() => onSelect(player.id)}>
+        <img src={player.imageUrl} alt={`${player.name} headshot`} loading="lazy" />
+        <span><strong>{player.name}</strong><small>#{player.jerseyNumber || '—'} · {player.position || '—'}</small></span>
+      </button>)}</div>
+      {!matches?.length ? <p role="status">No current roster players match.</p> : null}
+    </> : null}
+  </div>;
+}
+
 function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -465,7 +498,7 @@ function AdminPage() {
   const [lastName, setLastName] = useState('');
   const [jerseyNumber, setJerseyNumber] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editFields, setEditFields] = useState({ firstName: '', lastName: '', jerseyNumber: '' });
+  const [editFields, setEditFields] = useState({ firstName: '', lastName: '', jerseyNumber: '', hockeyTechPlayerId: '' });
   const [busy, setBusy] = useState(false);
 
   async function checkSession() {
@@ -509,7 +542,7 @@ function AdminPage() {
 
   function beginEdit(player: Player) {
     setEditingId(player.id);
-    setEditFields({ firstName: player.firstName, lastName: player.lastName, jerseyNumber: player.jerseyNumber ?? '' });
+    setEditFields({ firstName: player.firstName, lastName: player.lastName, jerseyNumber: player.jerseyNumber ?? '', hockeyTechPlayerId: player.hockeyTechPlayerId ?? '' });
   }
 
   async function savePlayerEdit(event: FormEvent) {
@@ -517,7 +550,7 @@ function AdminPage() {
     if (!editingId) return;
     setBusy(true); setError('');
     try {
-      const response = await fetch(`/api/admin/players/${encodeURIComponent(editingId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editFields) });
+      const response = await fetch(`/api/admin/players/${encodeURIComponent(editingId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...editFields, hockeyTechPlayerId: editFields.hockeyTechPlayerId.trim() || null }) });
       if (!response.ok) throw new Error((await response.json() as { error?: string }).error ?? 'Unable to update player.');
       setPlayers(await getJson<Player[]>('/api/players')); setEditingId(null);
     } catch (reason) { setError((reason as Error).message); }
@@ -536,7 +569,18 @@ function AdminPage() {
       <section className="admin-section"><div className="admin-section__heading"><div><p className="eyebrow eyebrow--dark">01 / Roster</p><h2>Manage players</h2></div><span>{players.length} players</span></div>
         <form className="player-form" onSubmit={addRosterPlayer}><label>First name<input required maxLength={80} value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label><label>Last name<input required maxLength={80} value={lastName} onChange={(event) => setLastName(event.target.value)} /></label><label>Number<input inputMode="numeric" maxLength={3} value={jerseyNumber} onChange={(event) => setJerseyNumber(event.target.value)} /></label><button className="button button--dark" disabled={busy}>Add player +</button></form>
         <RosterCsvImport onImported={() => { void getJson<Player[]>('/api/players').then(setPlayers); }} />
-        <div className="admin-roster">{players.map((player) => <div className="admin-roster__group" key={player.id}><div className="admin-roster__row"><span className="admin-roster__number">{player.jerseyNumber ? `#${player.jerseyNumber}` : '—'}</span><strong>{player.firstName} {player.lastName}</strong><button onClick={() => beginEdit(player)} aria-label={`Edit ${player.firstName} ${player.lastName}`}>Edit</button><button onClick={() => removeRosterPlayer(player)} aria-label={`Remove ${player.firstName} ${player.lastName}`}>Remove</button></div>{editingId === player.id ? <form className="player-edit-form" onSubmit={savePlayerEdit}><label>First name<input required value={editFields.firstName} onChange={(event) => setEditFields((current) => ({ ...current, firstName: event.target.value }))} /></label><label>Last name<input required value={editFields.lastName} onChange={(event) => setEditFields((current) => ({ ...current, lastName: event.target.value }))} /></label><label>Number<input inputMode="numeric" value={editFields.jerseyNumber} onChange={(event) => setEditFields((current) => ({ ...current, jerseyNumber: event.target.value }))} /></label><button className="button button--dark" disabled={busy}>Save changes</button><button type="button" className="button button--outline" onClick={() => setEditingId(null)}>Cancel</button></form> : null}</div>)}</div>
+        <div className="admin-roster">{players.map((player) => <div className="admin-roster__group" key={player.id}><div className="admin-roster__row"><span className="admin-roster__number">{player.jerseyNumber ? `#${player.jerseyNumber}` : '—'}</span><strong>{player.firstName} {player.lastName}</strong><button onClick={() => beginEdit(player)} aria-label={`Edit ${player.firstName} ${player.lastName}`}>Edit</button><button onClick={() => removeRosterPlayer(player)} aria-label={`Remove ${player.firstName} ${player.lastName}`}>Remove</button></div>{editingId === player.id ? <form className="player-edit-form" onSubmit={savePlayerEdit}>
+          <label>First name<input required value={editFields.firstName} onChange={(event) => setEditFields((current) => ({ ...current, firstName: event.target.value }))} /></label>
+          <label>Last name<input required value={editFields.lastName} onChange={(event) => setEditFields((current) => ({ ...current, lastName: event.target.value }))} /></label>
+          <label>Number<input inputMode="numeric" value={editFields.jerseyNumber} onChange={(event) => setEditFields((current) => ({ ...current, jerseyNumber: event.target.value }))} /></label>
+          <fieldset className="hockeytech-player"><legend>HockeyTech Player</legend>
+            <label>HockeyTech player ID<input inputMode="numeric" pattern="[0-9]*" maxLength={20} value={editFields.hockeyTechPlayerId} onChange={(event) => setEditFields((current) => ({ ...current, hockeyTechPlayerId: event.target.value }))} /></label>
+            <p>Enter an ID manually or choose a player from the current roster.</p>
+            <button type="button" className="button button--outline" onClick={() => setEditFields((current) => ({ ...current, hockeyTechPlayerId: '' }))}>Clear link</button>
+            <HockeyTechRosterPicker key={player.id} onSelect={(id) => setEditFields((current) => ({ ...current, hockeyTechPlayerId: id }))} />
+          </fieldset>
+          <button className="button button--dark" disabled={busy}>Save changes</button><button type="button" className="button button--outline" onClick={() => setEditingId(null)}>Cancel</button>
+        </form> : null}</div>)}</div>
         <div className="featured-section"><p className="eyebrow eyebrow--dark">Roster image</p><h3>Choose a featured photo</h3><FeaturedPhotoManager players={players} onSaved={() => { void getJson<Player[]>('/api/players').then(setPlayers); }} /></div>
       </section>
       <section className="admin-section"><div className="admin-section__heading"><div><p className="eyebrow eyebrow--dark">02 / Photos</p><h2>Manage photographs</h2></div></div><PhotoManager players={players} /><p>Original JPEGs stay untouched. Gallery images are prepared in this browser before upload.</p></section>

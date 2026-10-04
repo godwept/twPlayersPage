@@ -1,6 +1,12 @@
 export type GalleryPhoto = { id: string; filename: string; uploadedAt: string; displayUrl: string; originalDownloadUrl: string };
 export type PhotoCursor = { uploadedAt: string; id: string };
 export type GalleryPage = { items: GalleryPhoto[]; nextCursor: string | null };
+export type HockeyTechGalleryPage = {
+  playerId: string;
+  photoCount: number;
+  items: Array<Omit<GalleryPhoto, 'originalDownloadUrl'>>;
+  nextCursor: string | null;
+};
 
 function encodeCursor(cursor: PhotoCursor): string {
   return btoa(JSON.stringify(cursor)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
@@ -45,4 +51,18 @@ export async function listPlayerPhotos(db: D1Database, playerId: string, limit: 
 export async function findPhoto(db: D1Database, id: string): Promise<{ id: string; player_id: string; original_key: string; display_key: string; filename: string; state: string } | null> {
   return db.prepare('SELECT id, player_id, original_key, display_key, filename, state FROM photos WHERE id = ?').bind(id)
     .first<{ id: string; player_id: string; original_key: string; display_key: string; filename: string; state: string }>();
+}
+
+export async function listHockeyTechPlayerPhotos(db: D1Database, hockeyTechPlayerId: string, limit: number, cursorValue?: string): Promise<HockeyTechGalleryPage | null> {
+  if (cursorValue && !decodeCursor(cursorValue)) throw new TypeError('Invalid gallery cursor');
+  const player = await db.prepare(`SELECT id,
+    (SELECT COUNT(*) FROM photos WHERE player_id = players.id AND state = 'active') AS photoCount
+    FROM players WHERE hockeytech_player_id = ?`).bind(hockeyTechPlayerId).first<{ id: string; photoCount: number }>();
+  if (!player) return null;
+  const page = await listPlayerPhotos(db, player.id, limit, cursorValue);
+  return {
+    playerId: player.id, photoCount: player.photoCount,
+    items: (page?.items ?? []).map((photo) => ({ id: photo.id, filename: photo.filename, uploadedAt: photo.uploadedAt, displayUrl: photo.displayUrl })),
+    nextCursor: page?.nextCursor ?? null,
+  };
 }

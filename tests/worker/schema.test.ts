@@ -2,6 +2,16 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 
 describe('gallery schema', () => {
+  it('allows unlinked players and enforces unique non-null HockeyTech IDs', async () => {
+    const ids = [crypto.randomUUID(), crypto.randomUUID()];
+    for (const id of ids) {
+      await env.DB.prepare('INSERT INTO players (id, first_name, last_name, created_at, hockeytech_player_id) VALUES (?, ?, ?, ?, ?)')
+        .bind(id, 'Test', 'Link', new Date().toISOString(), null).run();
+    }
+    await env.DB.prepare('UPDATE players SET hockeytech_player_id = ? WHERE id = ?').bind('12345', ids[0]).run();
+    await expect(env.DB.prepare('UPDATE players SET hockeytech_player_id = ? WHERE id = ?').bind('12345', ids[1]).run()).rejects.toThrow(/UNIQUE/);
+  });
+
   it('keeps jersey numbers separate from permanent player IDs', async () => {
     const now = new Date().toISOString();
     const first = crypto.randomUUID();
