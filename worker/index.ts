@@ -7,6 +7,14 @@ import { findPhoto, listHockeyTechPlayerPhotos, listPlayerPhotos } from './repos
 import { makeStoreZipStream, uniqueZipNames } from './lib/store-zip';
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const HOCKEYTECH_BASE = 'https://lscluster.hockeytech.com/feed/index.php?client_code=mhl&league_id=1&site_id=2&key=4a948e7faf5ee58d&fmt=json';
+
+async function readHockeyTechJson(response: Response): Promise<unknown> {
+  if (!response.ok) throw new Error('HockeyTech request failed');
+  const text = (await response.text()).trim();
+  // HockeyTech can wrap JSON in parentheses or an Angular JSONP callback.
+  return JSON.parse(text.replace(/^(?:angular\.callbacks\._\d+)?\(\s*([\s\S]*)\s*\)\s*;?$/, '$1'));
+}
 
 type Bindings = {
   DB: D1Database;
@@ -69,9 +77,12 @@ app.get('/admin/session', (c) => c.json({ authenticated: true }, 200, { 'Cache-C
 
 app.get('/admin/hockeytech/roster', async (c) => {
   try {
-    const upstream = await fetch('https://tw-api.mathew-stewart.workers.dev/api/roster', { signal: AbortSignal.timeout(10_000) });
-    if (!upstream.ok) throw new Error('Roster request failed');
-    const payload = await upstream.json() as { roster?: Array<{ sections?: Array<{ data?: Array<{ row?: Record<string, unknown> }> }> }> };
+    const signal = AbortSignal.timeout(10_000);
+    // Resolve the season at lookup time; the fan-app proxy pins an older season.
+    const seasonPayload = await readHockeyTechJson(await fetch(`${HOCKEYTECH_BASE}&feed=modulekit&view=seasons`, { signal })) as { SiteKit?: { Parameters?: { season_id?: unknown } } };
+    const seasonId = String(seasonPayload?.SiteKit?.Parameters?.season_id ?? '');
+    if (!/^\d{1,20}$/.test(seasonId)) throw new Error('Malformed current season');
+    const payload = await readHockeyTechJson(await fetch(`${HOCKEYTECH_BASE}&feed=statviewfeed&view=roster&team_id=9&season_id=${seasonId}`, { signal })) as { roster?: Array<{ sections?: Array<{ data?: Array<{ row?: Record<string, unknown> }> }> }> };
     const sections = payload?.roster?.[0]?.sections;
     if (!Array.isArray(sections)) throw new Error('Malformed roster');
     const players: Array<{ id: string; name: string; jerseyNumber: string; position: string; imageUrl: string }> = [];

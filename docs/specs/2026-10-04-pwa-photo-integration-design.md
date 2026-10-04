@@ -31,7 +31,7 @@ The photographer must be able to link a player from the current Miramichi Timber
 - D1 schema change for `hockeytech_player_id`.
 - Player repository validation/read/write support.
 - Photographer admin lookup and manual override.
-- Authenticated roster-lookup endpoint backed by the existing `tw-api /api/roster` endpoint.
+- Authenticated roster-lookup endpoint backed directly by HockeyTech current-season discovery and the Miramichi roster feed.
 - Public HockeyTech-keyed gallery endpoint.
 - Public linked-player photo index.
 - Absolute optimized-image URLs for cross-app use.
@@ -76,11 +76,11 @@ The lookup is assistance only. The durable value is the HockeyTech ID; roster na
 
 ### Roster lookup dependency
 
-`twPlayersPage` calls the already-existing fan-app Worker roster endpoint:
+The owner approved direct HockeyTech lookup on 2026-10-04 after the fan-app proxy returned its pinned 2025–26 roster.
 
-`GET https://tw-api.mathew-stewart.workers.dev/api/roster`
+The authenticated Worker calls HockeyTech's `feed=modulekit&view=seasons` endpoint, reads the designated current `SiteKit.Parameters.season_id`, then requests `feed=statviewfeed&view=roster&team_id=9&season_id=<current-id>`. Resolve the season on each explicit lookup rather than pinning a season number. Parse JSON or JSONP without executing JavaScript.
 
-The browser does not call HockeyTech or `tw-api` directly from the admin page. The authenticated `twPlayersPage` Worker performs the upstream request and returns a normalized lookup payload.
+The browser does not call HockeyTech directly from the admin page. The authenticated `twPlayersPage` Worker performs the upstream requests and returns the same normalized lookup payload.
 
 If lookup is unavailable, the admin displays an error but manual ID entry remains usable.
 

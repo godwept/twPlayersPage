@@ -16,7 +16,7 @@ Do not change the response shapes documented in the design without coordinating 
 - `GET /api/integrations/hockeytech/players/:id/photos`
 - `GET /api/integrations/hockeytech/photo-index`
 
-The existing `GET https://tw-api.mathew-stewart.workers.dev/api/roster` endpoint is the admin lookup source.
+As approved by the owner on 2026-10-04, the admin lookup resolves HockeyTech's designated current season and requests the Miramichi roster directly. The public integration response contract is unchanged.
 
 ## Tasks
 
@@ -54,9 +54,9 @@ The existing `GET https://tw-api.mathew-stewart.workers.dev/api/roster` endpoint
 
 **Files:** `worker/index.ts`, `tests/worker/hockeytech-roster.test.ts`
 
-**Test first:** Mock upstream `tw-api /api/roster`; assert `GET /api/admin/hockeytech/roster` requires authentication and returns normalized `id/name/jerseyNumber/position/imageUrl` entries. Add malformed/upstream-error cases returning 502.
+**Test first:** Mock HockeyTech season discovery and roster requests; assert `GET /api/admin/hockeytech/roster` requires authentication, follows the designated current season across rollovers, parses JSON/JSONP, and returns normalized `id/name/jerseyNumber/position/imageUrl` entries. Add malformed/upstream-error cases returning 502 for both requests.
 
-**Implementation:** Add an admin GET route that fetches `https://tw-api.mathew-stewart.workers.dev/api/roster`, walks the existing HockeyTech `roster[0].sections[].data[].row` shape, drops entries without numeric `player_id`, and returns the normalized list. Build headshot URLs as `https://assets.leaguestat.com/mhl/240x240/{id}.jpg`.
+**Implementation:** Add an admin GET route that resolves `SiteKit.Parameters.season_id` from HockeyTech's `feed=modulekit&view=seasons` response, then requests `feed=statviewfeed&view=roster&team_id=9&season_id=<current-id>`. Parse JSON/JSONP without executing JavaScript, walk the existing `roster[0].sections[].data[].row` shape, drop entries without numeric `player_id`, and return the normalized list. Build headshot URLs as `https://assets.leaguestat.com/mhl/240x240/{id}.jpg`.
 
 **Verify:** `npm run test:worker -- tests/worker/hockeytech-roster.test.ts`.
 
