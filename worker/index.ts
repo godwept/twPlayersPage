@@ -77,6 +77,7 @@ app.get('/players', async (c) => {
       p.jersey_number AS jerseyNumber,
       COALESCE((SELECT selected.id FROM photos selected WHERE selected.id = p.featured_photo_id AND selected.player_id = p.id AND selected.state = 'active'),
         (SELECT recent.id FROM photos recent WHERE recent.player_id = p.id AND recent.state = 'active' ORDER BY recent.uploaded_at DESC, recent.id DESC LIMIT 1)) AS featuredPhotoId,
+      (SELECT COUNT(*) FROM photos counted WHERE counted.player_id = p.id AND counted.state = 'active') AS photoCount,
       p.crop_x AS cropX, p.crop_y AS cropY, p.crop_zoom AS cropZoom
     FROM players p ORDER BY p.jersey_number IS NULL, CAST(p.jersey_number AS INTEGER), p.last_name COLLATE NOCASE, p.id`).all();
   return c.json(result.results.map((player: Record<string, unknown>) => ({
@@ -85,6 +86,7 @@ app.get('/players', async (c) => {
     lastName: player.lastName,
     jerseyNumber: player.jerseyNumber,
     featuredPhotoId: player.featuredPhotoId,
+    photoCount: player.photoCount,
     featuredImageUrl: player.featuredPhotoId ? `/api/photos/${encodeURIComponent(String(player.featuredPhotoId))}/display` : null,
     crop: { x: player.cropX, y: player.cropY, zoom: player.cropZoom },
   })));

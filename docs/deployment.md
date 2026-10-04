@@ -73,3 +73,9 @@ All 25 Worker tests, typechecking, and the production build pass. Login is funct
 References: [Cloudflare's PBKDF2 cap](https://github.com/cloudflare/workerd/issues/1346), [CPU limits and temporary overrun allowance](https://developers.cloudflare.com/workers/platform/limits/#cpu-time), and [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
 
 After the gates pass, build and deploy with Wrangler, verify that anonymous browsing works and anonymous admin mutations return 401, then configure the hostname. The deployed Worker’s `/api/health` endpoint returns `{"ok":true}`.
+
+## Team sharing check on 2026-09-28
+
+After the dark-gallery deployment, the live public roster returned 23 players and 219 active photos. All 22 nonempty player ZIP endpoints returned successful read-only HEAD responses; each ZIP endpoint checks that all of that player's original R2 objects exist before returning archive headers. A 4-photo player ZIP was downloaded and opened successfully, and one downloaded original had the same SHA-256 hash as its ZIP entry. The public home and admin routes returned HTTP 200 and the health endpoint returned `{"ok":true}`.
+
+These checks support sharing the Workers.dev link for team browsing and feedback. They do not complete the public-launch gates above: a new representative authenticated upload has not been checked after the upload CPU change, and all 22 player ZIP bodies have not been downloaded and validated end to end. A full production-readiness claim should wait for those results.

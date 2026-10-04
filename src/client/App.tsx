@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, TouchEvent } from 'react';
 import { matchPhotoFilename } from '../shared/photo-filename';
 import { formatCrc32, photoChecksums } from '../../shared/photo-checksum';
 import { parseRosterCsv, type RosterCsvPlayer } from '../shared/roster-csv';
@@ -14,6 +14,7 @@ type Player = {
   featuredPhotoId?: string | null;
   crop?: { x: number; y: number; zoom: number };
 };
+type RosterPlayer = Player & { photoCount: number };
 type Photo = { id: string; filename: string; uploadedAt: string; displayUrl: string; originalDownloadUrl: string };
 type GalleryPage = { items: Photo[]; nextCursor: string | null };
 type SiteSettings = { bannerUrl: string | null; logoUrl: string | null; bannerPosition: { x: number; y: number } };
@@ -42,17 +43,17 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 function TeamMark({ logoUrl }: { logoUrl?: string | null }) {
-  return logoUrl ? <img className="team-mark" src={logoUrl} alt="Miramichi Timberwolves logo" /> : <span className="team-mark team-mark--fallback" aria-hidden="true">MT</span>;
+  return logoUrl ? <img className="team-mark" src={logoUrl} alt="Miramichi Timberwolves logo" /> : null;
 }
 
 function HomePage() {
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<RosterPlayer[]>([]);
   const [site, setSite] = useState<SiteSettings>({ bannerUrl: null, logoUrl: null, bannerPosition: { x: 0.5, y: 0.5 } });
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
-    Promise.all([getJson<Player[]>('/api/players'), getJson<SiteSettings>('/api/site')])
+    Promise.all([getJson<RosterPlayer[]>('/api/players'), getJson<SiteSettings>('/api/site')])
       .then(([roster, settings]) => { setPlayers(roster); setSite(settings); })
       .catch((reason: Error) => setError(reason.message));
   }, []);
@@ -66,23 +67,23 @@ function HomePage() {
   return (
     <>
       <header className={`hero${site.bannerUrl ? ' hero--photo' : ''}`} style={site.bannerUrl ? { backgroundImage: `linear-gradient(90deg, rgba(0,0,0,.76), rgba(0,0,0,.08)), url("${site.bannerUrl}")`, backgroundPosition: `${site.bannerPosition.x * 100}% ${site.bannerPosition.y * 100}%` } : undefined}>
-        <div className="hero__top"><a className="wordmark" href="/" aria-label="Miramichi Timberwolves home"><TeamMark logoUrl={site.logoUrl} /><span>MTW</span></a><a className="admin-link" href="/admin">Photographer login <span aria-hidden="true">↗</span></a></div>
-        <div className="hero__content"><p className="eyebrow">Miramichi · New Brunswick</p><h1 aria-label="Miramichi Timberwolves">Miramichi<br />Timberwolves</h1><p className="hero__caption">The team. The moments. All in one place.</p></div>
-        <div className="hero__foot"><span>Team photo gallery</span><a href="#roster">Meet the team <span aria-hidden="true">↓</span></a></div>
+        <div className="hero__top"><a className="wordmark" href="/" aria-label="Miramichi Timberwolves home"><TeamMark logoUrl={site.logoUrl} /><span>Timberwolves</span></a><a className="admin-link" href="/admin">Photographer login <span aria-hidden="true">↗</span></a></div>
+        <div className="hero__content"><p className="eyebrow">Player photo gallery</p><h1 aria-label="Miramichi Timberwolves">Miramichi<br />Timberwolves</h1></div>
+        <div className="hero__foot"><span>Find and download your photos</span><a href="#roster">View players <span aria-hidden="true">↓</span></a></div>
       </header>
 
       <main className="roster-section" id="roster">
-        <div className="section-heading"><div><p className="eyebrow eyebrow--dark">The roster</p><h2>Find your player.</h2></div><p className="section-note">Browse every player’s photos, captured throughout the season.</p></div>
+        <div className="section-heading"><div><p className="eyebrow eyebrow--dark">Photo roster</p><h2>Players</h2></div><p className="section-note">Search by name or jersey number.</p></div>
         <label className="search-box"><span className="sr-only">Search player name or jersey number</span><span aria-hidden="true" className="search-box__icon">⌕</span><input aria-label="Search player name or jersey number" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or number" /><kbd>↵</kbd></label>
         {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
         <div className="roster-grid">
           {filtered.map((player) => <a className="player-card" href={`/player/${encodeURIComponent(player.id)}`} key={player.id}>
-            <div className="player-card__image">{player.featuredImageUrl ? <img loading="lazy" src={player.featuredImageUrl} alt={`${player.firstName} ${player.lastName}`} style={{ objectPosition: `${(player.crop?.x ?? 0.5) * 100}% ${(player.crop?.y ?? 0.5) * 100}%`, transform: `scale(${player.crop?.zoom ?? 1})` }} /> : <div className="player-card__placeholder"><span>{player.jerseyNumber ? `#${player.jerseyNumber}` : 'MT'}</span><small>Photo coming soon</small></div>}<span className="player-card__number">{player.jerseyNumber ? `#${player.jerseyNumber}` : 'PLAYER'}</span></div>
-            <div className="player-card__details"><h3>{player.firstName} {player.lastName}</h3><span aria-hidden="true">↗</span></div>
+            <div className="player-card__image">{player.featuredImageUrl ? <img loading="lazy" src={player.featuredImageUrl} alt={`${player.firstName} ${player.lastName}`} style={{ objectPosition: `${(player.crop?.x ?? 0.5) * 100}% ${(player.crop?.y ?? 0.5) * 100}%`, transform: `scale(${player.crop?.zoom ?? 1})`, transformOrigin: `${(player.crop?.x ?? 0.5) * 100}% ${(player.crop?.y ?? 0.5) * 100}%` }} /> : <div className="player-card__placeholder"><span>{player.jerseyNumber ? `#${player.jerseyNumber}` : `${player.firstName.charAt(0)}${player.lastName.charAt(0)}`}</span><small>No photos yet</small></div>}<span className="player-card__number">{player.jerseyNumber ? `#${player.jerseyNumber}` : 'PLAYER'}</span></div>
+            <div className="player-card__details"><h3>{player.firstName} {player.lastName}</h3><span className="player-card__count">{player.photoCount} {player.photoCount === 1 ? 'photo' : 'photos'}</span></div>
           </a>)}
         </div>
         {!error && filtered.length === 0 ? <p className="empty-state">{players.length ? 'No players match that search.' : 'The roster will appear here soon.'}</p> : null}
-        <footer className="site-footer"><TeamMark logoUrl={site.logoUrl} /><span>Miramichi Timberwolves</span><span className="site-footer__right">A season worth remembering.</span></footer>
+        <footer className="site-footer"><TeamMark logoUrl={site.logoUrl} /><span>Miramichi Timberwolves</span><span className="site-footer__right">Player photo gallery</span></footer>
       </main>
     </>
   );
@@ -90,11 +91,15 @@ function HomePage() {
 
 function PlayerPage({ playerId }: { playerId: string }) {
   const [player, setPlayer] = useState<Player | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [viewerError, setViewerError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -104,6 +109,12 @@ function PlayerPage({ playerId }: { playerId: string }) {
     }).catch((reason: Error) => { if (active) setError(reason.message); });
     return () => { active = false; };
   }, [playerId]);
+
+  useEffect(() => {
+    let active = true;
+    void getJson<SiteSettings>('/api/site').then((settings) => { if (active) setLogoUrl(settings.logoUrl); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (selected === null) return;
@@ -117,29 +128,51 @@ function PlayerPage({ playerId }: { playerId: string }) {
     return () => { window.removeEventListener('keydown', onKeyDown); document.body.classList.remove('viewer-open'); };
   }, [selected, photos.length]);
 
-  async function loadMore() {
-    if (!cursor || loadingMore) return;
-    setLoadingMore(true);
+  async function loadMore(advanceViewer = false) {
+    if (!cursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true); setViewerError('');
     try {
       const page = await getJson<GalleryPage>(`/api/players/${encodeURIComponent(playerId)}/photos?cursor=${encodeURIComponent(cursor)}`);
       setPhotos((current) => [...current, ...page.items]); setCursor(page.nextCursor);
-    } catch (reason) { setError((reason as Error).message); }
-    finally { setLoadingMore(false); }
+      if (advanceViewer && page.items.length) setSelected((current) => current === null ? null : photos.length);
+    } catch (reason) {
+      if (advanceViewer) setViewerError((reason as Error).message);
+      else setError((reason as Error).message);
+    } finally { loadingMoreRef.current = false; setLoadingMore(false); }
+  }
+
+  function showNextPhoto() {
+    if (selected === null) return;
+    if (selected < photos.length - 1) setSelected(selected + 1);
+    else if (cursor) void loadMore(true);
+  }
+
+  function onViewerTouchEnd(event: TouchEvent<HTMLImageElement>) {
+    const start = touchStart.current;
+    touchStart.current = null;
+    const end = event.changedTouches[0];
+    if (!start || !end) return;
+    const dx = end.clientX - start.x;
+    const dy = end.clientY - start.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) showNextPhoto();
+    else if (selected !== null && selected > 0) setSelected(selected - 1);
   }
 
   if (error) return <main className="page-error"><a className="back-link" href="/">← All players</a><p className="notice notice--error" role="alert">{error}</p></main>;
   if (!player) return <main className="page-loading" aria-label="Loading player"><span className="loader" /></main>;
 
   return <main className="player-page">
-    <nav className="player-nav"><a className="back-link" href="/">← <span>All players</span></a><a className="wordmark wordmark--dark" href="/" aria-label="Miramichi Timberwolves home"><TeamMark /><span>MTW</span></a><a className="admin-link admin-link--dark" href="/admin">Admin <span aria-hidden="true">↗</span></a></nav>
-    <header className="player-heading"><p className="eyebrow eyebrow--dark">Player gallery</p><h1>{player.firstName} {player.lastName}<span>{player.jerseyNumber ? `#${player.jerseyNumber}` : ''}</span></h1><p>{photos.length ? `${photos.length}${cursor ? '+' : ''} photographs` : 'The moments that make a season.'}</p></header>
+    <nav className="player-nav"><a className="back-link" href="/">← <span>All players</span></a><a className="wordmark wordmark--dark" href="/" aria-label="Miramichi Timberwolves home"><TeamMark logoUrl={logoUrl} /><span>Timberwolves</span></a><a className="admin-link admin-link--dark" href="/admin">Admin <span aria-hidden="true">↗</span></a></nav>
+    <header className="player-heading"><p className="eyebrow eyebrow--dark">Player gallery</p><h1>{player.firstName} {player.lastName}<span>{player.jerseyNumber ? `#${player.jerseyNumber}` : ''}</span></h1><p>{photos.length ? `${photos.length}${cursor ? '+' : ''} photos` : 'No photos available yet'}</p></header>
     {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
     {photos.length ? <>
-      <div className="gallery-grid">{photos.map((photo, index) => <button className="gallery-tile" key={photo.id} onClick={() => setSelected(index)} aria-label={`View photo ${index + 1}: ${photo.filename}`}><img src={photo.displayUrl} alt={`${player.firstName} ${player.lastName}, photo ${index + 1}`} loading={index < 6 ? 'eager' : 'lazy'} /><span className="gallery-tile__download" aria-hidden="true">↗</span></button>)}</div>
-      <div className="gallery-actions">{cursor ? <button className="button button--outline" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more photos'}</button> : null}<a className="button button--dark" href={`/api/players/${encodeURIComponent(playerId)}/download.zip`} aria-disabled={!photos.length}>Download all photos <span aria-hidden="true">↓</span></a></div>
-    </> : <div className="gallery-empty"><div className="gallery-empty__icon">✳</div><h2>Every season starts somewhere.</h2><p>Photos of {player.firstName} will show up here as they’re added.</p><a className="button button--outline" href="/">Back to the roster</a></div>}
-    <footer className="site-footer site-footer--player"><TeamMark /><span>Miramichi Timberwolves</span><span className="site-footer__right">Original photos available to download.</span></footer>
-    {selected !== null && photos[selected] ? <div className="viewer" role="dialog" aria-modal="true" aria-label={`Photo ${selected + 1} of ${photos.length}`} onClick={() => setSelected(null)}><button className="viewer__close" onClick={() => setSelected(null)} aria-label="Close photo viewer">×</button><button className="viewer__arrow viewer__arrow--prev" aria-label="Previous photo" disabled={selected === 0} onClick={(event) => { event.stopPropagation(); setSelected(selected - 1); }}>←</button><img src={photos[selected].displayUrl} alt={`${player.firstName} ${player.lastName}, ${photos[selected].filename}`} onClick={(event) => event.stopPropagation()} /><button className="viewer__arrow viewer__arrow--next" aria-label="Next photo" disabled={selected === photos.length - 1} onClick={(event) => { event.stopPropagation(); setSelected(selected + 1); }}>→</button><div className="viewer__bottom" onClick={(event) => event.stopPropagation()}><span>{String(selected + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}</span><a href={photos[selected].originalDownloadUrl} download>Download original ↓</a></div></div> : null}
+      <div className="gallery-grid">{photos.map((photo, index) => <button className="gallery-tile" key={photo.id} onClick={() => { setViewerError(''); setSelected(index); }} aria-label={`View photo ${index + 1}: ${photo.filename}`}><img src={photo.displayUrl} alt={`${player.firstName} ${player.lastName}, photo ${index + 1}`} loading={index < 6 ? 'eager' : 'lazy'} /><span className="gallery-tile__download" aria-hidden="true">↗</span></button>)}</div>
+      <div className="gallery-actions">{cursor ? <button className="button button--outline" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more photos'}</button> : null}<a className="button button--dark" href={`/api/players/${encodeURIComponent(playerId)}/download.zip`} aria-disabled={!photos.length}>Download all photos <span aria-hidden="true">↓</span></a></div>
+    </> : <div className="gallery-empty"><h2>No photos available yet</h2><p>Check back for photos of {player.firstName}.</p><a className="button button--outline" href="/">Back to the roster</a></div>}
+    <footer className="site-footer site-footer--player"><TeamMark logoUrl={logoUrl} /><span>Miramichi Timberwolves</span><span className="site-footer__right">Download original photos from the viewer.</span></footer>
+    {selected !== null && photos[selected] ? <div className="viewer" role="dialog" aria-modal="true" aria-label={`Photo ${selected + 1} of ${photos.length}`} onClick={() => setSelected(null)}><button className="viewer__close" onClick={() => setSelected(null)} aria-label="Close photo viewer">×</button><button className="viewer__arrow viewer__arrow--prev" aria-label="Previous photo" disabled={selected === 0} onClick={(event) => { event.stopPropagation(); setSelected(selected - 1); }}>←</button><img src={photos[selected].displayUrl} alt={`${player.firstName} ${player.lastName}, ${photos[selected].filename}`} onClick={(event) => event.stopPropagation()} onTouchStart={(event) => { const touch = event.touches[0]; if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY }; }} onTouchEnd={onViewerTouchEnd} /><button className="viewer__arrow viewer__arrow--next" aria-label="Next photo" disabled={loadingMore || (selected === photos.length - 1 && !cursor)} onClick={(event) => { event.stopPropagation(); showNextPhoto(); }}>→</button>{viewerError ? <p className="viewer__error" role="alert" onClick={(event) => event.stopPropagation()}>{viewerError}</p> : null}<div className="viewer__bottom" onClick={(event) => event.stopPropagation()}><span>{String(selected + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}</span><a href={photos[selected].originalDownloadUrl} download>Download original ↓</a></div></div> : null}
   </main>;
 }
 
@@ -337,7 +370,7 @@ function AppearanceManager() {
   return <>
     <div className="appearance-grid">
       <label className="appearance-upload"><span className="eyebrow eyebrow--dark">Team banner</span>{settings?.bannerUrl ? <img src={settings.bannerUrl} alt="Current team banner" /> : <span className="appearance-placeholder">Banner image not set</span>}<span className="button button--outline">{busy ? 'Working…' : 'Replace banner'}</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { void upload('banner', event.currentTarget.files?.[0]); event.currentTarget.value = ''; }} /></label>
-      <label className="appearance-upload appearance-upload--logo"><span className="eyebrow eyebrow--dark">Optional team logo</span>{settings?.logoUrl ? <img src={settings.logoUrl} alt="Current team logo" /> : <span className="appearance-placeholder">Logo image not set</span>}<span className="button button--outline">{busy ? 'Working…' : 'Replace logo'}</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { void upload('logo', event.currentTarget.files?.[0]); event.currentTarget.value = ''; }} /></label>
+      <label className="appearance-upload appearance-upload--logo"><span className="eyebrow eyebrow--dark">Team logo</span>{settings?.logoUrl ? <img src={settings.logoUrl} alt="Current team logo" /> : <span className="appearance-placeholder">Logo image not set</span>}<span className="button button--outline">{busy ? 'Working…' : 'Replace logo'}</span><input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { void upload('logo', event.currentTarget.files?.[0]); event.currentTarget.value = ''; }} /></label>
     </div>
     <div className="banner-position"><p className="eyebrow eyebrow--dark">Banner crop position</p><label>Horizontal <input type="range" min="0" max="1" step="0.01" value={position.x} onChange={(event) => setPosition((current) => ({ ...current, x: Number(event.target.value) }))} /></label><label>Vertical <input type="range" min="0" max="1" step="0.01" value={position.y} onChange={(event) => setPosition((current) => ({ ...current, y: Number(event.target.value) }))} /></label><button className="button button--dark" onClick={savePosition} disabled={busy}>Save position</button></div>
     {message ? <p className="upload-message" role="status">{message}</p> : null}
@@ -383,7 +416,7 @@ function FeaturedPhotoManager({ players, onSaved }: { players: Player[]; onSaved
   return <div className="featured-manager"><div className="featured-manager__top"><label>Choose player<select value={playerId} onChange={(event) => setPlayerId(event.target.value)}><option value="">Select a player…</option>{players.map((entry) => <option value={entry.id} key={entry.id}>{entry.firstName} {entry.lastName}</option>)}</select></label>{player ? <span>{player.jerseyNumber ? `#${player.jerseyNumber}` : 'Roster photo'}</span> : null}</div>
     {player ? photos.length ? <><div className="featured-picks">{photos.map((photo) => <button type="button" key={photo.id} className={photo.id === photoId ? 'featured-pick featured-pick--selected' : 'featured-pick'} aria-pressed={photo.id === photoId} onClick={() => setPhotoId(photo.id)}><img src={photo.displayUrl} alt={`Select ${photo.filename} as featured photo`} /></button>)}</div>
       {cursor ? <button className="text-button" onClick={() => void loadMore()}>Load more gallery photos</button> : null}
-      {selectedPhoto ? <div className="featured-crop"><div className="featured-preview"><img src={selectedPhoto.displayUrl} alt="Roster portrait preview" style={{ objectPosition: `${crop.x * 100}% ${crop.y * 100}%`, transform: `scale(${crop.zoom})` }} /></div><div className="featured-crop__controls"><label>Horizontal position <input type="range" min="0" max="1" step="0.01" value={crop.x} onChange={(event) => setCrop((current) => ({ ...current, x: Number(event.target.value) }))} /></label><label>Vertical position <input type="range" min="0" max="1" step="0.01" value={crop.y} onChange={(event) => setCrop((current) => ({ ...current, y: Number(event.target.value) }))} /></label><label>Zoom <input type="range" min="1" max="4" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => ({ ...current, zoom: Number(event.target.value) }))} /></label><button className="button button--dark" disabled={busy} onClick={save}>Save roster portrait</button></div></div> : null}
+      {selectedPhoto ? <div className="featured-crop"><div className="featured-preview"><img src={selectedPhoto.displayUrl} alt="Roster portrait preview" style={{ objectPosition: `${crop.x * 100}% ${crop.y * 100}%`, transform: `scale(${crop.zoom})`, transformOrigin: `${crop.x * 100}% ${crop.y * 100}%` }} /></div><div className="featured-crop__controls"><label>Horizontal position <input type="range" min="0" max="1" step="0.01" value={crop.x} onChange={(event) => setCrop((current) => ({ ...current, x: Number(event.target.value) }))} /></label><label>Vertical position <input type="range" min="0" max="1" step="0.01" value={crop.y} onChange={(event) => setCrop((current) => ({ ...current, y: Number(event.target.value) }))} /></label><label>Zoom <input type="range" min="1" max="4" step="0.05" value={crop.zoom} onChange={(event) => setCrop((current) => ({ ...current, zoom: Number(event.target.value) }))} /></label><button className="button button--dark" disabled={busy} onClick={save}>Save roster portrait</button></div></div> : null}
     </> : <p className="empty-state">This player has no gallery photos to use yet.</p> : <p className="empty-state">Select a player to choose their roster image and crop.</p>}
     {message ? <p className="upload-message" role="status">{message}</p> : null}
   </div>;
@@ -424,6 +457,7 @@ function RosterCsvImport({ onImported }: { onImported: () => void }) {
 
 function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [players, setPlayers] = useState<Player[]>([]);
@@ -440,6 +474,11 @@ function AdminPage() {
     if (response.ok) setPlayers(await getJson<Player[]>('/api/players'));
   }
   useEffect(() => { void checkSession(); }, []);
+  useEffect(() => {
+    let active = true;
+    void getJson<SiteSettings>('/api/site').then((settings) => { if (active) setLogoUrl(settings.logoUrl); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   async function submitLogin(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
@@ -490,15 +529,15 @@ function AdminPage() {
     setAuthenticated(false);
   }
 
-  return <main className="admin-page"><a className="back-link" href="/">← Public gallery</a><div className="admin-brand"><TeamMark /><span>Photographer workspace</span></div>
-    {authenticated === null ? <p>Checking session…</p> : !authenticated ? <section className="login-panel"><p className="eyebrow eyebrow--dark">Timberwolves admin</p><h1>Welcome back.</h1><p>Sign in to manage the team gallery.</p><form onSubmit={submitLogin}><label>Administrator password<input autoComplete="current-password" type="password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error ? <p className="notice notice--error" role="alert">{error}</p> : null}<button className="button button--dark" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'} <span aria-hidden="true">→</span></button></form></section> : <>
-      <header className="admin-header"><div><p className="eyebrow eyebrow--dark">Administration</p><h1>Team workspace.</h1></div><button className="button button--outline" onClick={logout}>Sign out</button></header>
+  return <main className="admin-page"><a className="back-link" href="/">← Public gallery</a><div className="admin-brand"><TeamMark logoUrl={logoUrl} /><span>Miramichi Timberwolves</span></div>
+    {authenticated === null ? <p>Checking session…</p> : !authenticated ? <section className="login-panel"><p className="eyebrow eyebrow--dark">Administration</p><h1>Photographer login</h1><p>Sign in to manage the team gallery.</p><form onSubmit={submitLogin}><label>Administrator password<input autoComplete="current-password" type="password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error ? <p className="notice notice--error" role="alert">{error}</p> : null}<button className="button button--dark" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'} <span aria-hidden="true">→</span></button></form></section> : <>
+      <header className="admin-header"><div><p className="eyebrow eyebrow--dark">Administration</p><h1>Photographer admin</h1></div><button className="button button--outline" onClick={logout}>Sign out</button></header>
       {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
       <section className="admin-section"><div className="admin-section__heading"><div><p className="eyebrow eyebrow--dark">01 / Roster</p><h2>Manage players</h2></div><span>{players.length} players</span></div>
         <form className="player-form" onSubmit={addRosterPlayer}><label>First name<input required maxLength={80} value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label><label>Last name<input required maxLength={80} value={lastName} onChange={(event) => setLastName(event.target.value)} /></label><label>Number<input inputMode="numeric" maxLength={3} value={jerseyNumber} onChange={(event) => setJerseyNumber(event.target.value)} /></label><button className="button button--dark" disabled={busy}>Add player +</button></form>
         <RosterCsvImport onImported={() => { void getJson<Player[]>('/api/players').then(setPlayers); }} />
         <div className="admin-roster">{players.map((player) => <div className="admin-roster__group" key={player.id}><div className="admin-roster__row"><span className="admin-roster__number">{player.jerseyNumber ? `#${player.jerseyNumber}` : '—'}</span><strong>{player.firstName} {player.lastName}</strong><button onClick={() => beginEdit(player)} aria-label={`Edit ${player.firstName} ${player.lastName}`}>Edit</button><button onClick={() => removeRosterPlayer(player)} aria-label={`Remove ${player.firstName} ${player.lastName}`}>Remove</button></div>{editingId === player.id ? <form className="player-edit-form" onSubmit={savePlayerEdit}><label>First name<input required value={editFields.firstName} onChange={(event) => setEditFields((current) => ({ ...current, firstName: event.target.value }))} /></label><label>Last name<input required value={editFields.lastName} onChange={(event) => setEditFields((current) => ({ ...current, lastName: event.target.value }))} /></label><label>Number<input inputMode="numeric" value={editFields.jerseyNumber} onChange={(event) => setEditFields((current) => ({ ...current, jerseyNumber: event.target.value }))} /></label><button className="button button--dark" disabled={busy}>Save changes</button><button type="button" className="button button--outline" onClick={() => setEditingId(null)}>Cancel</button></form> : null}</div>)}</div>
-        <div className="featured-section"><p className="eyebrow eyebrow--dark">Roster image</p><h3>Choose a featured photo.</h3><FeaturedPhotoManager players={players} onSaved={() => { void getJson<Player[]>('/api/players').then(setPlayers); }} /></div>
+        <div className="featured-section"><p className="eyebrow eyebrow--dark">Roster image</p><h3>Choose a featured photo</h3><FeaturedPhotoManager players={players} onSaved={() => { void getJson<Player[]>('/api/players').then(setPlayers); }} /></div>
       </section>
       <section className="admin-section"><div className="admin-section__heading"><div><p className="eyebrow eyebrow--dark">02 / Photos</p><h2>Manage photographs</h2></div></div><PhotoManager players={players} /><p>Original JPEGs stay untouched. Gallery images are prepared in this browser before upload.</p></section>
       <section className="admin-section"><div className="admin-section__heading"><div><p className="eyebrow eyebrow--dark">Photo library</p><h2>Existing photos</h2></div></div><ExistingPhotoManager players={players} /></section>
