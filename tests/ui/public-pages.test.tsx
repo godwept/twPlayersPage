@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/client/App';
 
 const players = [
@@ -13,13 +13,120 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 
 function swipeViewer(startX: number, endX: number, startY = 100, endY = 100) {
   const image = within(screen.getByRole('dialog')).getByRole('img');
-  fireEvent.touchStart(image, { touches: [{ clientX: startX, clientY: startY }] });
-  fireEvent.touchEnd(image, { changedTouches: [{ clientX: endX, clientY: endY }] });
+  fireEvent.pointerDown(image, { pointerId: 1, pointerType: 'touch', clientX: startX, clientY: startY });
+  fireEvent.pointerMove(image, { pointerId: 1, pointerType: 'touch', clientX: endX, clientY: endY });
+  fireEvent.pointerUp(image, { pointerId: 1, pointerType: 'touch', clientX: endX, clientY: endY });
 }
 
-afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState({}, '', '/'); });
+beforeEach(() => {
+  vi.stubGlobal('PointerEvent', class extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+      this.pointerType = init.pointerType ?? 'mouse';
+    }
+  });
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+});
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState({}, '', '/'); });
+
+function loadViewerImage() {
+  const image = within(screen.getByRole('dialog')).getByRole('img') as HTMLImageElement;
+  vi.spyOn(image.parentElement!, 'getBoundingClientRect').mockReturnValue({ width: 600, height: 400, left: 0, top: 0, right: 600, bottom: 400, x: 0, y: 0, toJSON: () => ({}) });
+  Object.defineProperties(image, { naturalWidth: { value: 1200, configurable: true }, naturalHeight: { value: 800, configurable: true } });
+  fireEvent.load(image);
+  return image;
+}
+
+function zoomAndPanViewer() {
+  const image = loadViewerImage();
+  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+  fireEvent.pointerDown(image, { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 200 });
+  fireEvent.pointerMove(image, { pointerId: 1, pointerType: 'touch', clientX: 350, clientY: 230 });
+  fireEvent.pointerUp(image, { pointerId: 1, pointerType: 'touch', clientX: 350, clientY: 230 });
+  expect(image.style.transform).toBe('translate(50px, 30px) scale(2)');
+  return image;
+}
 
 describe('public pages', () => {
+  it('keeps zoom through a pagination failure and resets it only after successful navigation', async () => {
+    window.history.replaceState({}, '', '/player/player-1');
+    let attempts = 0;
+    let releasePage: (response: Response) => void = () => {};
+    const retry = new Promise<Response>((resolve) => { releasePage = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/site')) return json(site);
+      if (url.includes('cursor=')) return ++attempts === 1 ? json({ error: 'Could not load photos' }, 503) : retry;
+      return json(url.endsWith('/photos') ? { items: [photo(1)], nextCursor: 'second' } : players[0]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'View photo 1: north1.jpg' }));
+    const image = zoomAndPanViewer();
+    fireEvent.pointerDown(image, { pointerId: 2, pointerType: 'touch', clientX: 350, clientY: 200 });
+    fireEvent.pointerDown(image, { pointerId: 3, pointerType: 'touch', clientX: 450, clientY: 200 });
+    fireEvent.pointerMove(image, { pointerId: 3, pointerType: 'touch', clientX: 550, clientY: 200 });
+    fireEvent.pointerUp(image, { pointerId: 3, pointerType: 'touch', clientX: 550, clientY: 200 });
+    fireEvent.pointerUp(image, { pointerId: 2, pointerType: 'touch', clientX: 350, clientY: 200 });
+    expect(attempts).toBe(0);
+    const enlarged = image.style.transform;
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }));
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Could not load photos');
+    expect(within(screen.getByRole('dialog')).getByRole('img')).toBe(image);
+    expect(image.style.transform).toBe(enlarged);
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }));
+    expect(screen.getByRole('button', { name: 'Next photo' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Next photo' }));
+    expect(attempts).toBe(2);
+    expect(screen.getByRole('dialog', { name: 'Photo 1 of 1' })).toBeVisible();
+    expect(image.style.transform).toBe(enlarged);
+    releasePage(json({ items: [photo(2)], nextCursor: null }));
+    expect(await screen.findByRole('dialog', { name: 'Photo 2 of 2' })).toBeVisible();
+    expect(loadViewerImage().style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(screen.getByRole('button', { name: 'Next photo' })).toBeDisabled();
+    expect(within(screen.getByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByRole('link', { name: /Download original/ })).toHaveAttribute('href', '/api/photos/photo-2/original');
+  });
+
+  it.each(['buttons', 'keyboard'])('resets zoom and pan when navigating with %s and reopening the viewer', async (navigation) => {
+    window.history.replaceState({}, '', '/player/player-1');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => json(String(input).endsWith('/api/site') ? site : String(input).endsWith('/photos')
+      ? { items: [photo(1), photo(2)], nextCursor: null } : players[0])));
+    render(<App />);
+    const firstTile = await screen.findByRole('button', { name: 'View photo 1: north1.jpg' });
+    fireEvent.click(firstTile);
+    expect(screen.getByRole('button', { name: 'Previous photo' })).toBeDisabled();
+    zoomAndPanViewer();
+    if (navigation === 'buttons') fireEvent.click(screen.getByRole('button', { name: 'Next photo' }));
+    else fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(screen.getByRole('dialog', { name: 'Photo 2 of 2' })).toBeVisible();
+    expect(loadViewerImage().style.transform).toBe('translate(0px, 0px) scale(1)');
+    expect(screen.getByRole('button', { name: 'Next photo' })).toBeDisabled();
+    zoomAndPanViewer();
+    if (navigation === 'buttons') fireEvent.click(screen.getByRole('button', { name: 'Previous photo' }));
+    else fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(loadViewerImage().style.transform).toBe('translate(0px, 0px) scale(1)');
+    const image = zoomAndPanViewer();
+    fireEvent.click(image);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Close photo viewer' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveClass('viewer-open');
+    fireEvent.click(firstTile);
+    expect(loadViewerImage().style.transform).toBe('translate(0px, 0px) scale(1)');
+    zoomAndPanViewer();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset zoom' }));
+    swipeViewer(300, 100);
+    expect(screen.getByRole('dialog', { name: 'Photo 2 of 2' })).toBeVisible();
+    expect(loadViewerImage().style.transform).toBe('translate(0px, 0px) scale(1)');
+    fireEvent.click(screen.getByRole('dialog'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('loads the roster and searches by player name or jersey number', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -63,6 +170,10 @@ describe('public pages', () => {
     expect(screen.getAllByRole('img', { name: 'Miramichi Timberwolves logo' }).length).toBeGreaterThan(0);
     fireEvent.click(photoButton);
     expect(screen.getByRole('dialog', { name: 'Photo 1 of 1' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeVisible();
+    expect(within(screen.getByRole('dialog')).getByRole('img')).toHaveAttribute('src', '/api/photos/photo-1/display');
     expect(within(screen.getByRole('dialog')).getByRole('link', { name: /Download original/ })).toHaveAttribute('href', '/api/photos/photo-1/original');
     fireEvent.keyDown(window, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());

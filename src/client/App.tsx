@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, TouchEvent } from 'react';
+import type { FormEvent } from 'react';
+import PhotoViewport from './PhotoViewport';
 import { matchPhotoFilename } from '../shared/photo-filename';
 import { formatCrc32, photoChecksums } from '../../shared/photo-checksum';
 import { parseRosterCsv, type RosterCsvPlayer } from '../shared/roster-csv';
@@ -101,7 +102,6 @@ function PlayerPage({ playerId }: { playerId: string }) {
   const [viewerError, setViewerError] = useState('');
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -150,18 +150,6 @@ function PlayerPage({ playerId }: { playerId: string }) {
     else if (cursor) void loadMore(true);
   }
 
-  function onViewerTouchEnd(event: TouchEvent<HTMLImageElement>) {
-    const start = touchStart.current;
-    touchStart.current = null;
-    const end = event.changedTouches[0];
-    if (!start || !end) return;
-    const dx = end.clientX - start.x;
-    const dy = end.clientY - start.y;
-    if (Math.abs(dx) < 50 || Math.abs(dx) <= Math.abs(dy)) return;
-    if (dx < 0) showNextPhoto();
-    else if (selected !== null && selected > 0) setSelected(selected - 1);
-  }
-
   if (error) return <main className="page-error"><a className="back-link" href="/">← All players</a><p className="notice notice--error" role="alert">{error}</p></main>;
   if (!player) return <main className="page-loading" aria-label="Loading player"><span className="loader" /></main>;
 
@@ -174,7 +162,14 @@ function PlayerPage({ playerId }: { playerId: string }) {
       <div className="gallery-actions">{cursor ? <button className="button button--outline" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more photos'}</button> : null}<a className="button button--dark" href={`/api/players/${encodeURIComponent(playerId)}/download.zip`} aria-disabled={!photos.length}>Download all photos <span aria-hidden="true">↓</span></a></div>
     </> : <div className="gallery-empty"><h2>No photos available yet</h2><p>Check back for photos of {player.firstName}.</p><a className="button button--outline" href="/">Back to the roster</a></div>}
     <footer className="site-footer site-footer--player"><TeamMark logoUrl={logoUrl} /><span>Miramichi Timberwolves</span><span className="site-footer__right">Download original photos from the viewer.</span></footer>
-    {selected !== null && photos[selected] ? <div className="viewer" role="dialog" aria-modal="true" aria-label={`Photo ${selected + 1} of ${photos.length}`} onClick={() => setSelected(null)}><button className="viewer__close" onClick={() => setSelected(null)} aria-label="Close photo viewer">×</button><button className="viewer__arrow viewer__arrow--prev" aria-label="Previous photo" disabled={selected === 0} onClick={(event) => { event.stopPropagation(); setSelected(selected - 1); }}>←</button><img src={photos[selected].displayUrl} alt={`${player.firstName} ${player.lastName}, ${photos[selected].filename}`} onClick={(event) => event.stopPropagation()} onTouchStart={(event) => { const touch = event.touches[0]; if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY }; }} onTouchEnd={onViewerTouchEnd} /><button className="viewer__arrow viewer__arrow--next" aria-label="Next photo" disabled={loadingMore || (selected === photos.length - 1 && !cursor)} onClick={(event) => { event.stopPropagation(); showNextPhoto(); }}>→</button>{viewerError ? <p className="viewer__error" role="alert" onClick={(event) => event.stopPropagation()}>{viewerError}</p> : null}<div className="viewer__bottom" onClick={(event) => event.stopPropagation()}><span>{String(selected + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}</span><a href={photos[selected].originalDownloadUrl} download>Download original ↓</a></div></div> : null}
+    {selected !== null && photos[selected] ? <div className="viewer" role="dialog" aria-modal="true" aria-label={`Photo ${selected + 1} of ${photos.length}`} onClick={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
+      <button className="viewer__close" onClick={() => setSelected(null)} aria-label="Close photo viewer">×</button>
+      <button className="viewer__arrow viewer__arrow--prev" aria-label="Previous photo" title="Previous photo" disabled={selected === 0} onClick={(event) => { event.stopPropagation(); setSelected(selected - 1); }}><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6l-6 6 6 6" /></svg></button>
+      <PhotoViewport key={photos[selected].id} src={photos[selected].displayUrl} alt={`${player.firstName} ${player.lastName}, ${photos[selected].filename}`} onPrevious={() => setSelected(Math.max(0, selected - 1))} onNext={showNextPhoto} />
+      <button className="viewer__arrow viewer__arrow--next" aria-label="Next photo" title="Next photo" disabled={loadingMore || (selected === photos.length - 1 && !cursor)} onClick={(event) => { event.stopPropagation(); showNextPhoto(); }}><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" /></svg></button>
+      {viewerError ? <p className="viewer__error" role="alert" onClick={(event) => event.stopPropagation()}>{viewerError}</p> : null}
+      <div className="viewer__bottom" onClick={(event) => event.stopPropagation()}><span>{String(selected + 1).padStart(2, '0')} / {String(photos.length).padStart(2, '0')}</span><a href={photos[selected].originalDownloadUrl} download>Download original ↓</a></div>
+    </div> : null}
   </main>;
 }
 
